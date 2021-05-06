@@ -90,3 +90,5 @@ press the **Initialize Interpreter** button. Selecting an Edge TPU model then
 requires you to select the USB Accelerator in the dialog; selecting a CPU model
 will be ready immediately. At this moment, you can run inference on any local
 image file by pressing the **Choose Image File** button.
+
+![WebCoral Detection Demo](https://user-images.githubusercontent.com/716798/117263928-999adf80-ae07-11eb-90e2-23d692426cfb.gif)
