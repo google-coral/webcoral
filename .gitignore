@@ -1,0 +1,7 @@
+bazel-*
+.distdir
+*.zip
+site/interpreter.*
+site/models/*.tflite
+third_party/dfu-util
+

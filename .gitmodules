@@ -1,0 +1,6 @@
+[submodule "third_party/libedgetpu"]
+	path = third_party/libedgetpu
+	url = https://github.com/google-coral/libedgetpu.git
+[submodule "third_party/webdfu"]
+	path = third_party/webdfu
+	url = https://github.com/devanlai/webdfu.git
