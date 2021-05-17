@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+  <meta charset='UTF-8'>
+  <title>Coral USB Accelerator Demo</title>
+  <script src='dfu.js'></script>
+  <script src='dfuse.js'></script>
+  <script src='models.js'></script>
+  <script src='tflite.js'></script>
+  <script src='interpreter.js'></script>
+</head>
+
+<body>
+
+  <h1>Coral USB Accelerator Demo</h1>
+
+  <canvas id='canvas' width="320" height="240">
+    <video id="video" width="320" height="240" autoPlay playsInline />
+  </canvas>
+  <br>
+  <input id="btnStop" type="button" value="stop" />
+  <input id="btnStart" type="button" value="start" />
+  <br>
+  <canvas style="visibility: hidden" id='hidden' width="320" height="240"></canvas>
+
+  <script>
+
+    // DFU functions are based on the code from
+    // https://github.com/devanlai/webdfu/blob/gh-pages/dfu-util/dfu-util.js
+    async function getDFUDescriptorProperties(device) {
+      let data = await device.readConfigurationDescriptor(0);
+      let configDesc = dfu.parseConfigurationDescriptor(data);
+      let funcDesc = null;
+      if (configDesc.bConfigurationValue == device.settings.configuration.configurationValue) {
+        for (let desc of configDesc.descriptors) {
+          if (desc.bDescriptorType == 0x21 && desc.hasOwnProperty('bcdDFUVersion')) {
+            funcDesc = desc;
+            break;
+          }
+        }
+      }
+
+      if (!funcDesc) return {};
+
+      return {
+        WillDetach: ((funcDesc.bmAttributes & 0x08) != 0),
+        ManifestationTolerant: ((funcDesc.bmAttributes & 0x04) != 0),
+        CanUpload: ((funcDesc.bmAttributes & 0x02) != 0),
+        CanDnload: ((funcDesc.bmAttributes & 0x01) != 0),
+        TransferSize: funcDesc.wTransferSize,
+        DetachTimeOut: funcDesc.wDetachTimeOut,
+        DFUVersion: funcDesc.bcdDFUVersion
+      };
+    }
+
+    async function connect(device) {
+      await device.open();
+
+      let desc = await getDFUDescriptorProperties(device);
+      if (desc && Object.keys(desc).length > 0)
+        device.properties = desc;
+
+      device.logDebug = console.log;
+      device.logInfo = console.log;
+      device.logWarning = console.log;
+      device.logError = console.log;
+      device.logProgress = console.log;
+
+      return device;
+    }
+
+    async function openDevice() {
+      try {
+        let device = await navigator.usb.requestDevice({
+          'filters': [{ 'vendorId': 0x1a6e, 'productId': 0x089a }]
+        });
+        let interfaces = dfu.findDeviceDfuInterfaces(device);
+        if (interfaces.length != 1) return null;
+        return await connect(new dfu.Device(device, interfaces[0]));
+      } catch (error) {
+        return null;
+      }
+    }
+
+    async function loadFile(url) {
+      return new Promise(resolve => {
+        let req = new XMLHttpRequest();
+        req.open('GET', url, true);
+        req.responseType = 'arraybuffer';
+        req.onload = event => { resolve(req.response); };
+        req.send(null);
+      });
+    }
+
+    function _startVideo() {
+      navigator.mediaDevices.getUserMedia(constraints)
+        .then((stream) => {
+          const player = document.getElementById('video');
+          player.srcObject = stream;
+        })
+        .catch(function (err) {
+          console.debug(err.name + ': ' + err.message);
+        });
+    }
+
+    // Video player with inference code ...
+    const constraints = {
+      audio: false,
+      video: {
+        width: 320,
+        height: 240
+      }
+    };
+
+    const canvas = document.getElementById('canvas');
+    const canvasWidth = canvas.width;
+    const canvasHeight = canvas.height;
+
+    const ctx = canvas.getContext('2d');
+    const hiddenCanvas = document.getElementById('hidden');
+    const ctxHidden = hiddenCanvas.getContext('2d');
+
+    const player = document.getElementById('video');
+    const color = 'red';
+    const model = TFLITE_MODELS['ssd_mobilenet_face_tpu'];
+    let interpreter = new tflite.Interpreter();
+
+
+    document.getElementById('btnStop').addEventListener('click', async () => {
+      player.srcObject.getVideoTracks().forEach(track => track.stop());
+    });
+
+    document.getElementById('btnStart').addEventListener('click', async () => {
+      _startVideo();
+      if (await interpreter.createFromBuffer(await loadFile(model.url))) {
+        player.requestVideoFrameCallback(handleFrame);
+      }
+    });
+
+    /* 
+      Please see: Perform efficient per-video-frame operations on video with requestVideoFrameCallback()
+      https://web.dev/requestvideoframecallback-rvfc/
+    */
+    const handleFrame = (now, metadata) => {
+
+      if (interpreter) {
+
+        [_, height, width, _] = interpreter.inputShape(0);
+        ctxHidden.drawImage(player, 0, 0, canvasWidth, canvasHeight);
+        const imageData = ctxHidden.getImageData(0, 0, 320, 320);
+        tflite.setRgbaInput(interpreter, imageData.data);
+
+        ctx.drawImage(player, 0, 0, canvasWidth, canvasHeight);
+        ctx.strokeStyle = color;
+        // ctx.fillStyle = color;
+
+        interpreter.invoke();
+
+        const objects = tflite.getDetectionOutput(interpreter, threshold = 0.6);
+        for (obj of objects) {
+          const x = obj.bbox.xmin * width;
+          const y = obj.bbox.ymin * height;
+          const w = obj.bbox.xmax * width - x;
+          const h = obj.bbox.ymax * height - y;
+          ctx.strokeRect(x, y, w, h);
+        }
+      }
+      player.requestVideoFrameCallback(handleFrame);
+    };
+
+  </script>
+</body>
+
+</html>
